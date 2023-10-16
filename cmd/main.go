@@ -1,0 +1,55 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/AlekseiAndriushin/go_chat_server/internal/config"
+	"github.com/AlekseiAndriushin/go_chat_server/internal/lib/handler"
+	"github.com/AlekseiAndriushin/go_chat_server/pkg/chat_v1"
+	"github.com/fatih/color"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
+)
+
+func main() {
+	cfg := config.MustConfig()
+	iLog := log.New(os.Stdout, color.CyanString("[INFO] "), log.LstdFlags)
+
+	iLog.Println("Starting chat service...")
+
+	url := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.GRPCPort)
+
+	lis, err := net.Listen("tcp", url)
+	if err != nil {
+		errStr := fmt.Sprintf("failed to listen: %v", err)
+		iLog.Fatalf(color.RedString(errStr))
+	}
+
+	s := grpc.NewServer()
+	reflection.Register(s)
+
+	rpcSrvV1 := handler.NewChatRPCServerV1(iLog)
+
+	chat_v1.RegisterChat_V1Server(s, rpcSrvV1)
+
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			errStr := fmt.Sprintf("failed to serve: %v", err)
+			iLog.Fatalf(color.RedString(errStr))
+		}
+	}()
+
+	iLog.Println(color.GreenString("Chat service started successfully "), color.BlueString(url))
+
+	<-done
+	s.GracefulStop()
+	iLog.Println(color.YellowString("Chat service stopped"))
+}
